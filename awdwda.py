@@ -61,7 +61,7 @@ def run_simulation():
             raise ValueError("Ускорение свободного падения должно быть около 9.81 м/с².")
         if not (0.1 <= values["v"] <= 100):
             raise ValueError("Горизонтальная скорость должна быть в диапазоне 0.1–100 м/с.")
-        if not (0.001 <= values["h"] <= 1.0):
+        if not (0.0001 <= values["h"] <= 1.0):
             raise ValueError("Шаг интегрирования должен быть от 0.001 до 1.0 с.")
         if not (1 <= values["max_time"] <= 10000):
             raise ValueError("Максимальное время расчёта должно быть от 1 до 10000 с.")
@@ -96,6 +96,7 @@ def run_simulation():
             y_points.append(y)
             velocity_points.append(z)
             if y >= 0:
+                print(t, y, x, z)
                 break
 
         # Очистка графика
@@ -147,14 +148,14 @@ plot_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
 # Параметры
 param_info = [
     ("rho0", "Плотность воды (кг/м³)", 1025),
-    ("rho1", "Плотность лодки (кг/м³)", 1030),
-    ("V", "Объем лодки (м³)", 1.0),
-    ("H", "Начальная глубина (м)", -500),
+    ("rho1", "Плотность лодки (кг/м³)", 1000),
+    ("V", "Объем лодки (м³)", 100.0),
+    ("H", "Начальная глубина (м)", -50),
     ("eta", "Коэфф. вязкости (Па·с)", 0.001),
-    ("k", "Коэфф. сопротивления", 10),
-    ("alpha", "Глубинный коэфф.", 10),
+    ("k", "Коэфф. сопротивления", 0.5),
+    ("alpha", "Глубинный коэфф.", 0.01),
     ("g", "Ускорение g (м/с²)", 9.81),
-    ("v", "Гор. скорость (м/с)", 10),
+    ("v", "Гор. скорость (м/с)", 4),
     ("h", "Шаг интегрирования (с)", 0.1),
     ("max_time", "Макс. время расчета (с)", 1000),
 ]
@@ -168,7 +169,6 @@ for i, (key, label_text, default) in enumerate(param_info):
     entry.grid(row=i, column=1, pady=3, padx=5)
     entries[key] = entry
 
-# Кнопка
 run_button = ttk.Button(input_frame, text="Построить график", command=run_simulation)
 run_button.grid(row=len(param_info), column=0, columnspan=2, pady=15)
 
