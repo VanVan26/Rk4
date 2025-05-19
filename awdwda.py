@@ -1,175 +1,147 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+import math
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-# Расчётные функции
-def f1(y, z):
-    return z
+def derivs(state, t, params):
+    x, y, vx, vy = state
+    rho0, rho1_0, V, eta, k, alpha, H, g, mu, F_thrust, theta = params
+    m_t = rho1_0 * V - mu * t
+    m_t = max(m_t, 1e-5)
+    rho1_t = m_t / V
 
-def f2(y, z, rho0, rho1, V, eta, k, alpha, H, g):
-    Fb = g * (rho0 / rho1 - 1)
-    Fc = (eta * k) / (rho1 * V) * (1 + alpha * abs(y) / abs(H)) * z
-    return Fb - Fc
 
-def rk4_step(t, x, y, z, h, v, params):
-    rho0, rho1, V, eta, k, alpha, H, g = params
-    k1_y = h * f1(y, z)
-    k1_z = h * f2(y, z, rho0, rho1, V, eta, k, alpha, H, g)
+    Fb = rho0 * V * g  # Архимедова сила
+    Fg = rho1_t * V * g  # Сила тяжести
+    Fc_x = eta * k * abs(vx)  # Сопротивление по x
+    Fc_y = eta * k * (1 + alpha * abs(y) / abs(H)) * abs(vy)  # Сопротивление по y
 
-    k2_y = h * f1(y + k1_y / 2, z + k1_z / 2)
-    k2_z = h * f2(y + k1_y / 2, z + k1_z / 2, rho0, rho1, V, eta, k, alpha, H, g)
+    Fx_thrust = F_thrust * math.cos(math.radians(theta))
+    Fy_thrust = F_thrust * math.sin(math.radians(theta))
 
-    k3_y = h * f1(y + k2_y / 2, z + k2_z / 2)
-    k3_z = h * f2(y + k2_y / 2, z + k2_z / 2, rho0, rho1, V, eta, k, alpha, H, g)
+    Fx = Fx_thrust - math.copysign(Fc_x, vx)
+    Fy = Fy_thrust + (Fb - Fg) - math.copysign(Fc_y, vy)
 
-    k4_y = h * f1(y + k3_y, z + k3_z)
-    k4_z = h * f2(y + k3_y, z + k3_z, rho0, rho1, V, eta, k, alpha, H, g)
+    dxdt = vx
+    dydt = vy
+    dvxdt = Fx / m_t
+    dvydt = Fy / m_t
 
-    y_new = y + (k1_y + 2 * k2_y + 2 * k3_y + k4_y) / 6
-    z_new = z + (k1_z + 2 * k2_z + 2 * k3_z + k4_z) / 6
-    x_new = x + v * h
+    return [dxdt, dydt, dvxdt, dvydt]
 
-    return t + h, x_new, y_new, z_new
+
+def rk4_step(t, state, h, params):
+    k1 = derivs(state, t, params)
+    st2 = [state[i] + 0.5 * h * k1[i] for i in range(4)]
+    k2 = derivs(st2, t + 0.5 * h, params)
+    st3 = [state[i] + 0.5 * h * k2[i] for i in range(4)]
+    k3 = derivs(st3, t + 0.5 * h, params)
+    st4 = [state[i] + h * k3[i] for i in range(4)]
+    k4 = derivs(st4, t + h, params)
+
+    new_state = [
+        state[i] + (h / 6) * (k1[i] + 2 * k2[i] + 2 * k3[i] + k4[i])
+        for i in range(4)
+    ]
+    return new_state
+
 
 def run_simulation():
     try:
-        # Сбор параметров
         values = {}
         for key, _, _ in param_info:
-            val_str = entries[key].get().strip().replace(",", ".")
-            if val_str == "":
+            val = entries[key].get().strip().replace(",", ".")
+            if val == "":
                 raise ValueError(f"Параметр '{key}' не задан.")
-            values[key] = float(val_str)
+            values[key] = float(val)
 
-        # Проверки реалистичности значений
-        if not (800 <= values["rho0"] <= 1200):
-            raise ValueError("Плотность воды должна быть в диапазоне 800–1200 кг/м³.")
-        if not (800 <= values["rho1"] <= 2000):
-            raise ValueError("Плотность лодки должна быть в диапазоне 800–2000 кг/м³.")
-        if not (0.01 <= values["V"] <= 100):
-            raise ValueError("Объём лодки должен быть в диапазоне 0.01–100 м³.")
-        if values["H"] >= 0:
-            raise ValueError("Начальная глубина должна быть отрицательной (под водой).")
-        if not (0.00001 <= values["eta"] <= 1):
-            raise ValueError("Коэффициент вязкости должен быть от 0.00001 до 1 Па·с.")
-        if not (0.1 <= values["k"] <= 100):
-            raise ValueError("Коэффициент сопротивления должен быть от 0.1 до 100.")
-        if not (0 <= values["alpha"] <= 100):
-            raise ValueError("Глубинный коэффициент должен быть от 0 до 100.")
-        if not (9 <= values["g"] <= 10):
-            raise ValueError("Ускорение свободного падения должно быть около 9.81 м/с².")
-        if not (0.1 <= values["v"] <= 100):
-            raise ValueError("Горизонтальная скорость должна быть в диапазоне 0.1–100 м/с.")
-        if not (0.0001 <= values["h"] <= 1.0):
-            raise ValueError("Шаг интегрирования должен быть от 0.001 до 1.0 с.")
-        if not (1 <= values["max_time"] <= 10000):
-            raise ValueError("Максимальное время расчёта должно быть от 1 до 10000 с.")
-
-        # Извлечение
         rho0 = values["rho0"]
-        rho1 = values["rho1"]
+        rho1_0 = values["rho1"]
         V = values["V"]
         H = values["H"]
         eta = values["eta"]
         k = values["k"]
         alpha = values["alpha"]
         g = values["g"]
-        v = values["v"]
+        mu = values["mu"]
+        F_thrust = values["F_thrust"]
+        theta = values["theta"]
         h = values["h"]
         max_time = values["max_time"]
 
-        # Начальные условия
-        y0, z0, t0, x0 = H, 0, 0, 0
-        t, x, y, z = t0, x0, y0, z0
-        time_points = [t]
-        x_points = [x]
-        y_points = [y]
-        velocity_points = [z]
+        state = [0.0, H, 0.0, 0.0]
+        t = 0.0
+        time_points, x_points, y_points = [t], [state[0]], [state[1]]
 
-        params = (rho0, rho1, V, eta, k, alpha, H, g)
+        params = (rho0, rho1_0, V, eta, k, alpha, H, g, mu, F_thrust, theta)
 
-        while t < max_time:
-            t, x, y, z = rk4_step(t, x, y, z, h, v, params)
+        while t < max_time and state[1] < 0:
+            state = rk4_step(t, state, h, params)
+            t += h
             time_points.append(t)
-            x_points.append(x)
-            y_points.append(y)
-            velocity_points.append(z)
-            if y >= 0:
-                print(t, y, x, z)
-                break
+            x_points.append(state[0])
+            y_points.append(state[1])
+            print(state[0], state[1], state[2], state[3], t)
 
-        # Очистка графика
         for widget in plot_frame.winfo_children():
             widget.destroy()
 
-        fig = Figure(figsize=(6, 5), dpi=100)
-        ax = fig.add_subplot(111)
-        ax.plot(x_points, y_points, color='green', linewidth=2.5, label='Траектория лодки')
-        ax.axhline(0, color='blue', linestyle='--', linewidth=2, label='Поверхность воды')
-        ax.set_title("Траектория всплытия", fontsize=14, fontweight='bold')
-        ax.set_xlabel("Горизонтальное расстояние, м")
-        ax.set_ylabel("Глубина, м")
-        ax.grid(True, linestyle='--', alpha=0.5)
-        ax.legend()
+        fig = Figure(figsize=(8, 6), dpi=100)
+        ax1 = fig.add_subplot(111)
+        ax1.plot(x_points, y_points, label='Траектория')
+        ax1.axhline(0, color='blue', linestyle='--', label='Поверхность')
+        ax1.set_xlabel('x, м')
+        ax1.set_ylabel('y (глубина), м')
+        ax1.legend()
+        ax1.grid(True)
 
         canvas = FigureCanvasTkAgg(fig, master=plot_frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
 
-    except ValueError as ve:
-        messagebox.showerror("Ошибка валидации", str(ve))
+        messagebox.showinfo("Результат", f"Время всплытия: {t:.1f} секунд")
+
     except Exception as e:
-        messagebox.showerror("Ошибка", f"Произошла ошибка: {e}")
+        messagebox.showerror("Ошибка", str(e))
 
-# Окно
+
 root = tk.Tk()
-root.title("Модель всплытия подводной лодки")
-root.geometry("1000x600")
-root.configure(bg="#f0f0f0")
+root.title("Модель всплытия подлодки (реальные параметры)")
+root.geometry("1100x650")
 
-# Стилизация ttk
-style = ttk.Style(root)
-style.theme_use("clam")
-style.configure("TLabel", font=("Segoe UI", 10), background="#f0f0f0")
-style.configure("TEntry", font=("Segoe UI", 10))
-style.configure("TButton", font=("Segoe UI", 10, "bold"), padding=6)
-
-# Основная рамка
 main_frame = ttk.Frame(root)
 main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
 input_frame = ttk.Frame(main_frame)
-input_frame.pack(side=tk.LEFT, padx=10, pady=10, anchor='n')
-
+input_frame.pack(side=tk.LEFT, padx=10)
 plot_frame = ttk.Frame(main_frame)
-plot_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=10, pady=10)
+plot_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-# Параметры
 param_info = [
-    ("rho0", "Плотность воды (кг/м³)", 1025),
-    ("rho1", "Плотность лодки (кг/м³)", 1000),
-    ("V", "Объем лодки (м³)", 100.0),
-    ("H", "Начальная глубина (м)", -50),
-    ("eta", "Коэфф. вязкости (Па·с)", 0.001),
-    ("k", "Коэфф. сопротивления", 0.5),
-    ("alpha", "Глубинный коэфф.", 0.01),
-    ("g", "Ускорение g (м/с²)", 9.81),
-    ("v", "Гор. скорость (м/с)", 4),
-    ("h", "Шаг интегрирования (с)", 0.1),
-    ("max_time", "Макс. время расчета (с)", 1000),
+    ("rho0", "Плотность воды, кг/м³", 1025),
+    ("rho1", "Плотность лодки, кг/м³", 1025),
+    ("V", "Объём лодки, м³", 12250.0),
+    ("H", "Начальная глубина, м", -300.0),
+    ("eta", "Коэфф. вязкости, Па·с", 0.001),
+    ("k", "Коэфф. сопротивления", 1.2),
+    ("alpha", "Глубинный коэффициент α", 0.01),
+    ("g", "Ускорение свободного падения", 9.81),
+    ("mu", "Скорость сброса массы, кг/с", 2000.0),
+    ("F_thrust", "Сила тяги, Н", 500000.0),
+    ("theta", "Угол тяги, град", 5.0),
+    ("h", "Шаг интегрирования, с", 0.01),
+    ("max_time", "Макс. время, с", 300.0),
 ]
 
 entries = {}
-for i, (key, label_text, default) in enumerate(param_info):
-    label = ttk.Label(input_frame, text=label_text)
-    label.grid(row=i, column=0, sticky="e", pady=3)
-    entry = ttk.Entry(input_frame, width=15)
+for i, (key, label, default) in enumerate(param_info):
+    ttk.Label(input_frame, text=label).grid(row=i, column=0, sticky="e", pady=2)
+    entry = ttk.Entry(input_frame, width=12)
     entry.insert(0, str(default))
-    entry.grid(row=i, column=1, pady=3, padx=5)
+    entry.grid(row=i, column=1, pady=2)
     entries[key] = entry
 
-run_button = ttk.Button(input_frame, text="Построить график", command=run_simulation)
-run_button.grid(row=len(param_info), column=0, columnspan=2, pady=15)
+ttk.Button(input_frame, text="Запустить", command=run_simulation).grid(row=len(param_info), column=0, columnspan=2,
+                                                                       pady=10)
 
 root.mainloop()
